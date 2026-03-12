@@ -10,6 +10,7 @@ import com.example.controller.BotController;
 import com.example.data.DataManager;
 import com.example.observers.ChatObserver;
 import com.example.observers.CombatObserver;
+import com.example.observers.LanguageObserver;
 import com.example.observers.PlayerStatusObserver;
 import com.example.observers.WorldObserver;
 import net.fabricmc.api.ModInitializer;
@@ -36,6 +37,7 @@ public class ExampleMod implements ModInitializer {
     private WorldObserver worldObserver;
     private PlayerStatusObserver playerStatusObserver;
     private ChatObserver chatObserver;
+    private LanguageObserver languageObserver;
 
     private boolean ollamaAvailable = false;
 
@@ -71,9 +73,12 @@ public class ExampleMod implements ModInitializer {
         worldObserver = new WorldObserver(blackboard);
         playerStatusObserver = new PlayerStatusObserver(blackboard);
         chatObserver = new ChatObserver(blackboard);
+        chatObserver.setPersonalityGenerator(personalityGenerator); // Conectar para personalidad por jugador
+        languageObserver = new LanguageObserver(blackboard);
     }
 
     private void registerObservers() {
+        languageObserver.register();
         combatObserver.register();
         worldObserver.register();
         playerStatusObserver.register();
@@ -115,10 +120,10 @@ public class ExampleMod implements ModInitializer {
         dataManager.loadData();
         blackboard.clearAllState();
 
-        if (!blackboard.hasPersonality() && ollamaAvailable) {
-            personalityGenerator.generatePersonalityAsync(seed);
-        } else if (blackboard.hasPersonality()) {
-            LOGGER.info("Personalidad cargada: {}", blackboard.getBotName());
+        // La personalidad global ya no es necesaria - cada jugador tiene su propia personalidad
+        // Se mantiene como fallback por si hay datos antiguos
+        if (blackboard.hasPersonality()) {
+            LOGGER.info("Personalidad global cargada: {} (fallback)", blackboard.getBotName());
         }
     }
 

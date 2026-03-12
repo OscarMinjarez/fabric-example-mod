@@ -6,6 +6,8 @@ import com.example.blackboard.Blackboard;
 import com.example.blackboard.BotEvent;
 import com.example.config.ModConfig;
 import com.example.data.DataManager;
+import com.example.util.LanguageManager;
+import com.example.util.LanguageManager.LanguageProfile;
 import com.example.util.NameParser;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -48,8 +50,6 @@ public class BotController {
     }
 
     private void onServerTick(MinecraftServer server) {
-        if (!blackboard.hasPersonality()) return;
-
         int tick = ++tickCounter;
         if (tick % PROCESS_INTERVAL_TICKS != 0) return;
 
@@ -57,35 +57,93 @@ public class BotController {
             tickCounter = 0;
         }
 
+        // Procesar saludos pendientes que quedaron esperando a la personalidad
+        processPendingGreetings(server);
+
         if (!blackboard.hasEvents()) return;
 
         if (processing.compareAndSet(false, true)) {
             CompletableFuture.runAsync(() -> {
                 try {
                     processNextEvent();
+                } catch (Exception e) {
+                    LOGGER.error("Error no manejado procesando evento: {}", e.getMessage(), e);
                 } finally {
                     processing.set(false);
                 }
             });
+        } else {
+            LOGGER.debug("Ya hay un procesamiento en curso, esperando...");
+        }
+    }
+
+    private void processPendingGreetings(MinecraftServer server) {
+        var pending = blackboard.getPendingGreetings();
+        if (pending.isEmpty()) return;
+        
+        blackboard.clearPendingGreetings();
+        
+        for (String uuid : pending) {
+            try {
+                ServerPlayer player = server.getPlayerList().getPlayer(java.util.UUID.fromString(uuid));
+                if (player != null && player.connection != null) {
+                    var event = new BotEvent(
+                            player.getUUID(),
+                            "GREETING_NEW_PLAYER",
+                            BotEvent.Impact.HIGH,
+                            System.currentTimeMillis(),
+                            true
+                    );
+                    blackboard.publishEvent(event);
+                    LOGGER.info("Saludo pendiente enviado a cola para: {}", player.getName().getString());
+                } else {
+                    // El jugador aún no está listo, volver a intentar
+                    blackboard.addPendingGreeting(uuid);
+                }
+            } catch (Exception e) {
+                LOGGER.debug("Error procesando saludo pendiente: {}", e.getMessage());
+            }
         }
     }
 
     private void processNextEvent() {
         BotEvent event = blackboard.pollEvent();
-        if (event == null) return;
+        if (event == null) {
+            LOGGER.debug("No hay eventos en la cola");
+            return;
+        }
 
         String uuid = event.playerUuid().toString();
+        LOGGER.info("Procesando evento: {} para jugador {}", event.prompt(), uuid);
+        
         MinecraftServer server = blackboard.getCurrentServer();
-        if (server == null) return;
+        if (server == null) {
+            LOGGER.warn("Server es null, reponiendo evento");
+            blackboard.publishEvent(event);
+            return;
+        }
 
         ServerPlayer player = server.getPlayerList().getPlayer(event.playerUuid());
-        if (player == null) return;
-
-        if (!validateCooldowns(uuid, event)) {
+        if (player == null) {
+            LOGGER.warn("Player es null para UUID {}, descartando evento", uuid);
             return;
         }
 
         String prompt = event.prompt();
+
+        // Eventos del flujo de registro no requieren personalidad
+        boolean isRegistrationFlow = prompt.startsWith("GREETING_") || prompt.startsWith("CHAT_NAME_RECEIVED:");
+        if (!isRegistrationFlow && !blackboard.hasPlayerPersonality(uuid)) {
+            LOGGER.info("Evento ignorado para {}: sin personalidad asignada", uuid);
+            return;
+        }
+
+        if (!validateCooldowns(uuid, event)) {
+            LOGGER.debug("Evento ignorado por cooldown: {}", prompt);
+            return;
+        }
+
+        LOGGER.info("Ejecutando handler para: {}", prompt);
 
         if (prompt.startsWith("GREETING_NEW_PLAYER")) {
             handleNewPlayerGreeting(player, uuid);
@@ -129,12 +187,14 @@ public class BotController {
     }
 
     private void handleNewPlayerGreeting(ServerPlayer player, String uuid) {
-        JsonObject personality = blackboard.getPersonality();
+        JsonObject personality = blackboard.getPersonalityForPlayer(uuid);
         if (personality == null) return;
 
         String botName = personality.get("name").getAsString();
-        String systemPrompt = promptManager.buildEmotivePrompt(personality);
-        String userPrompt = "Alguien nuevo se conectó. Salúdalo y DEBES preguntarle '¿cómo te llamas?' o '¿cuál es tu nombre?'. Es OBLIGATORIO que le preguntes su nombre.";
+        String language = blackboard.getPlayerLanguage(uuid);
+        LanguageProfile langProfile = LanguageManager.getProfile(language);
+        String systemPrompt = promptManager.buildEmotivePrompt(personality, language);
+        String userPrompt = langProfile.getGreetingPrompt();
 
         try {
             String reply = ollamaClient.callOllama(systemPrompt, userPrompt, new JsonArray());
@@ -147,7 +207,7 @@ public class BotController {
     }
 
     private void handleReturningPlayerGreeting(ServerPlayer player, String uuid) {
-        JsonObject personality = blackboard.getPersonality();
+        JsonObject personality = blackboard.getPersonalityForPlayer(uuid);
         if (personality == null) return;
         String playerName = blackboard.getPlayerName(uuid);
         if (playerName == null) {
@@ -155,8 +215,10 @@ public class BotController {
             return;
         }
         String botName = personality.get("name").getAsString();
-        String systemPrompt = promptManager.buildNormalPrompt(personality) + " El jugador se llama " + playerName + ".";
-        String userPrompt = playerName + " acaba de volver al mundo. Dale la bienvenida como a un amigo que ya conoces.";
+        String language = blackboard.getPlayerLanguage(uuid);
+        LanguageProfile langProfile = LanguageManager.getProfile(language);
+        String systemPrompt = promptManager.buildNormalPrompt(personality, language) + langProfile.getPlayerNameContext(playerName);
+        String userPrompt = langProfile.getReturningPlayerPrompt(playerName);
         JsonArray history = blackboard.getPlayerHistory(uuid);
         try {
             String reply = ollamaClient.callOllama(systemPrompt, userPrompt, history);
@@ -170,12 +232,14 @@ public class BotController {
     }
 
     private void handleNameReceived(ServerPlayer player, String uuid, String playerName) {
-        JsonObject personality = blackboard.getPersonality();
+        JsonObject personality = blackboard.getPersonalityForPlayer(uuid);
         if (personality == null) return;
 
         String botName = personality.get("name").getAsString();
-        String systemPrompt = promptManager.buildEmotivePrompt(personality);
-        String userPrompt = "El jugador te dijo que se llama " + playerName + ". Salúdalo por su nombre de forma casual y amigable.";
+        String language = blackboard.getPlayerLanguage(uuid);
+        LanguageProfile langProfile = LanguageManager.getProfile(language);
+        String systemPrompt = promptManager.buildEmotivePrompt(personality, language);
+        String userPrompt = langProfile.getNameReceivedPrompt(playerName);
 
         try {
             String reply = ollamaClient.callOllama(systemPrompt, userPrompt, new JsonArray());
@@ -189,12 +253,14 @@ public class BotController {
     }
 
     private void handleChatMessage(ServerPlayer player, String uuid, String message) {
-        JsonObject personality = blackboard.getPersonality();
+        JsonObject personality = blackboard.getPersonalityForPlayer(uuid);
         if (personality == null) return;
         String playerName = blackboard.getPlayerName(uuid);
         if (playerName == null) return;
         String botName = personality.get("name").getAsString();
-        String systemPrompt = promptManager.buildSystemPrompt(personality) + " El jugador se llama " + playerName + ".";
+        String language = blackboard.getPlayerLanguage(uuid);
+        LanguageProfile langProfile = LanguageManager.getProfile(language);
+        String systemPrompt = promptManager.buildSystemPrompt(personality, language) + langProfile.getPlayerNameContext(playerName);
         blackboard.addPlayerHistory(uuid, "user", message, ollamaClient.getMaxHistory());
         JsonArray history = blackboard.getPlayerHistory(uuid);
         try {
@@ -209,12 +275,13 @@ public class BotController {
     }
 
     private void handleGenericEvent(ServerPlayer player, String uuid, BotEvent event) {
-        JsonObject personality = blackboard.getPersonality();
+        JsonObject personality = blackboard.getPersonalityForPlayer(uuid);
         if (personality == null) return;
         String playerName = blackboard.getPlayerName(uuid);
         if (playerName == null) return;
         String botName = personality.get("name").getAsString();
-        String systemPrompt = promptManager.buildPromptWithPlayerName(personality, event.impact(), playerName);
+        String language = blackboard.getPlayerLanguage(uuid);
+        String systemPrompt = promptManager.buildPromptWithPlayerName(personality, event.impact(), playerName, language);
         JsonArray history = blackboard.getPlayerHistory(uuid);
         String prompt = event.prompt().replace("[nombre]", playerName);
         try {

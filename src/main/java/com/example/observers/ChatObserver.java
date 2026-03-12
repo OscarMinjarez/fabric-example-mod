@@ -1,5 +1,6 @@
 package com.example.observers;
 
+import com.example.ai.PersonalityGenerator;
 import com.example.blackboard.Blackboard;
 import com.example.blackboard.BotEvent;
 import com.example.blackboard.BotEvent.Impact;
@@ -17,9 +18,14 @@ public class ChatObserver {
     private static final Logger LOGGER = LoggerFactory.getLogger("ChatObserver");
 
     private final Blackboard blackboard;
+    private PersonalityGenerator personalityGenerator;
 
     public ChatObserver(Blackboard blackboard) {
         this.blackboard = blackboard;
+    }
+
+    public void setPersonalityGenerator(PersonalityGenerator generator) {
+        this.personalityGenerator = generator;
     }
 
     public void register() {
@@ -32,6 +38,7 @@ public class ChatObserver {
         ServerPlayConnectionEvents.JOIN.register((handler, packetSender, server) -> {
             ServerPlayer player = handler.player;
             String uuid = player.getUUID().toString();
+            String language = blackboard.getPlayerLanguage(uuid);
 
             CompletableFuture.runAsync(() -> {
                 try {
@@ -39,15 +46,24 @@ public class ChatObserver {
                 } catch (InterruptedException ignored) {
                 }
 
-                if (!blackboard.hasPersonality()) {
-                    blackboard.addPendingGreeting(uuid);
-                    return;
-                }
-
+                // Si el jugador ya está esperando nombre, no hacer nada
                 if (blackboard.isAwaitingName(uuid)) {
                     return;
                 }
 
+                // Verificar si necesita generar personalidad para este jugador
+                if (!blackboard.hasPlayerPersonality(uuid)) {
+                    // Marcar como pendiente de personalidad
+                    blackboard.addPendingPersonality(uuid);
+
+                    // Generar personalidad para este jugador
+                    if (personalityGenerator != null) {
+                        personalityGenerator.generatePlayerPersonalityAsync(uuid, language);
+                    }
+                    return;
+                }
+
+                // Ya tiene personalidad, proceder con saludo
                 if (!blackboard.hasPlayer(uuid)) {
                     BotEvent event = new BotEvent(
                             player.getUUID(),
@@ -76,7 +92,20 @@ public class ChatObserver {
             String uuid = sender.getUUID().toString();
             String content = message.signedContent().trim();
 
-            if (!blackboard.hasPersonality()) return;
+            // Esperar a que tenga personalidad antes de procesar mensajes
+            if (!blackboard.hasPlayerPersonality(uuid)) {
+                // Si está pendiente de personalidad, ignorar por ahora
+                if (blackboard.isPendingPersonality(uuid)) {
+                    return;
+                }
+                // Si no tiene y no está pendiente, generar
+                String language = blackboard.getPlayerLanguage(uuid);
+                blackboard.addPendingPersonality(uuid);
+                if (personalityGenerator != null) {
+                    personalityGenerator.generatePlayerPersonalityAsync(uuid, language);
+                }
+                return;
+            }
 
             if (blackboard.isAwaitingName(uuid)) {
                 blackboard.removeAwaitingName(uuid);
@@ -114,5 +143,3 @@ public class ChatObserver {
         });
     }
 }
-
-

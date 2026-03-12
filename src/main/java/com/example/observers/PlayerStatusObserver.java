@@ -71,7 +71,6 @@ public class PlayerStatusObserver {
     }
 
     private void onServerTick(MinecraftServer server) {
-        if (!blackboard.hasPersonality()) return;
         if (server.getPlayerList().getPlayers().isEmpty()) return;
 
         int tick = ++tickCounter;

@@ -33,13 +33,16 @@ public class Blackboard {
 
     private final Map<String, String> lastBiome;
     private final Map<String, String> lastDimension;
+    private final Map<String, String> playerLanguage;
 
     private final Set<String> awaitingName;
     private final Set<String> pendingGreeting;
+    private final Set<String> pendingPersonality;
 
     private volatile long lastDayTime = -1;
     private volatile boolean wasRaining = false;
     private volatile boolean wasThundering = false;
+    private volatile String serverLanguage = "es_mx";
 
     private final Object dataLock = new Object();
 
@@ -53,8 +56,10 @@ public class Blackboard {
         this.lowFoodWarned = new ConcurrentHashMap<>();
         this.lastBiome = new ConcurrentHashMap<>();
         this.lastDimension = new ConcurrentHashMap<>();
+        this.playerLanguage = new ConcurrentHashMap<>();
         this.awaitingName = Collections.synchronizedSet(new HashSet<>());
         this.pendingGreeting = Collections.synchronizedSet(new HashSet<>());
+        this.pendingPersonality = Collections.synchronizedSet(new HashSet<>());
     }
 
     public static synchronized Blackboard getInstance() {
@@ -67,15 +72,23 @@ public class Blackboard {
     public void publishEvent(BotEvent event) {
         cleanupOldEventsForPlayer(event.playerUuid(), event.impact());
         eventQueue.offer(event);
-        LOGGER.debug("Evento publicado: {} para jugador {}", event.impact(), event.playerUuid());
+        LOGGER.info("Evento publicado: {} - {} para jugador {}", event.prompt(), event.impact(), event.playerUuid());
     }
 
     public BotEvent pollEvent() {
-        return eventQueue.poll();
+        BotEvent event = eventQueue.poll();
+        if (event != null) {
+            LOGGER.debug("Evento extraído de cola: {}", event.prompt());
+        }
+        return event;
     }
 
     public boolean hasEvents() {
-        return !eventQueue.isEmpty();
+        boolean has = !eventQueue.isEmpty();
+        if (has) {
+            LOGGER.debug("Cola tiene {} eventos", eventQueue.size());
+        }
+        return has;
     }
 
     private void cleanupOldEventsForPlayer(UUID playerUuid, BotEvent.Impact newEventImpact) {
@@ -220,11 +233,79 @@ public class Blackboard {
         synchronized (dataLock) {
             if (botData == null) return;
             JsonObject players = botData.has("players") ? botData.getAsJsonObject("players") : new JsonObject();
-            JsonObject newPlayer = new JsonObject();
-            newPlayer.addProperty("name", name);
-            newPlayer.add("history", new JsonArray());
-            players.add(uuid, newPlayer);
+
+            if (players.has(uuid)) {
+                // Preservar datos existentes (personalidad, historial)
+                JsonObject existing = players.getAsJsonObject(uuid);
+                existing.addProperty("name", name);
+                if (!existing.has("history")) {
+                    existing.add("history", new JsonArray());
+                }
+            } else {
+                JsonObject newPlayer = new JsonObject();
+                newPlayer.addProperty("name", name);
+                newPlayer.add("history", new JsonArray());
+                players.add(uuid, newPlayer);
+            }
+
             botData.add("players", players);
+            botData.add("players", players);
+        }
+    }
+
+    /**
+     * Obtiene la personalidad específica de un jugador, o la global si no tiene.
+     */
+    public JsonObject getPersonalityForPlayer(String uuid) {
+        synchronized (dataLock) {
+            // Primero verificar si el jugador tiene personalidad propia
+            JsonObject playerData = getPlayerData(uuid);
+            if (playerData != null && playerData.has("personality")) {
+                return playerData.getAsJsonObject("personality");
+            }
+            // Si no, usar la personalidad global del mundo
+            return getPersonality();
+        }
+    }
+
+    /**
+     * Verifica si un jugador tiene personalidad propia asignada.
+     */
+    public boolean hasPlayerPersonality(String uuid) {
+        synchronized (dataLock) {
+            JsonObject playerData = getPlayerData(uuid);
+            return playerData != null && playerData.has("personality");
+        }
+    }
+
+    /**
+     * Asigna una personalidad específica a un jugador.
+     */
+    public void setPlayerPersonality(String uuid, JsonObject personality) {
+        synchronized (dataLock) {
+            if (botData == null || !botData.has("players")) return;
+            JsonObject players = botData.getAsJsonObject("players");
+            if (!players.has(uuid)) {
+                // Crear entrada de jugador si no existe
+                JsonObject newPlayer = new JsonObject();
+                newPlayer.add("history", new JsonArray());
+                newPlayer.add("personality", personality);
+                players.add(uuid, newPlayer);
+            } else {
+                JsonObject pd = players.getAsJsonObject(uuid);
+                pd.add("personality", personality);
+            }
+        }
+    }
+
+    /**
+     * Verifica si se necesita generar personalidad para un jugador.
+     * Retorna true si el jugador es nuevo y no tiene personalidad.
+     */
+    public boolean needsPersonalityGeneration(String uuid) {
+        synchronized (dataLock) {
+            if (!hasPlayer(uuid)) return true;
+            return !hasPlayerPersonality(uuid);
         }
     }
 
@@ -336,6 +417,25 @@ public class Blackboard {
         pendingGreeting.clear();
     }
 
+    // Métodos para personalidad pendiente por jugador
+    public boolean isPendingPersonality(String uuid) {
+        return pendingPersonality.contains(uuid);
+    }
+
+    public void addPendingPersonality(String uuid) {
+        pendingPersonality.add(uuid);
+    }
+
+    public void removePendingPersonality(String uuid) {
+        pendingPersonality.remove(uuid);
+    }
+
+    public Set<String> getPendingPersonalities() {
+        synchronized (pendingPersonality) {
+            return new HashSet<>(pendingPersonality);
+        }
+    }
+
     public long getLastDayTime() {
         return lastDayTime;
     }
@@ -360,10 +460,28 @@ public class Blackboard {
         this.wasThundering = thundering;
     }
 
+    // Manejo de idiomas
+    public String getPlayerLanguage(String uuid) {
+        return playerLanguage.getOrDefault(uuid, serverLanguage);
+    }
+
+    public void setPlayerLanguage(String uuid, String language) {
+        playerLanguage.put(uuid, language);
+    }
+
+    public String getServerLanguage() {
+        return serverLanguage;
+    }
+
+    public void setServerLanguage(String language) {
+        this.serverLanguage = language;
+    }
+
     public void clearAllState() {
         eventQueue.clear();
         awaitingName.clear();
         pendingGreeting.clear();
+        pendingPersonality.clear();
         lastSpontaneousMs.clear();
         lastHighEventMs.clear();
         nextSpontMs.clear();
@@ -372,6 +490,7 @@ public class Blackboard {
         lowFoodWarned.clear();
         lastBiome.clear();
         lastDimension.clear();
+        playerLanguage.clear();
         lastDayTime = -1;
         wasRaining = false;
         wasThundering = false;

@@ -4,6 +4,7 @@ import com.example.blackboard.Blackboard;
 import com.example.blackboard.BotEvent;
 import com.example.blackboard.BotEvent.Impact;
 import com.example.data.DataManager;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.server.level.ServerPlayer;
@@ -142,6 +143,173 @@ public class PersonalityGenerator {
         CompletableFuture.runAsync(() -> generatePersonality(worldSeed));
     }
 
+    /**
+     * Genera una personalidad única para un jugador específico.
+     * Esto permite que cada jugador tenga su propio compañero bot con personalidad distinta.
+     */
+    public void generatePlayerPersonalityAsync(String uuid, String playerLanguage) {
+        CompletableFuture.runAsync(() -> generatePlayerPersonality(uuid, playerLanguage));
+    }
+
+    private void generatePlayerPersonality(String uuid, String playerLanguage) {
+        // Si ya tiene personalidad, no generar nueva
+        if (blackboard.hasPlayerPersonality(uuid)) {
+            blackboard.removePendingPersonality(uuid);
+            publishGreetingForPlayer(uuid);
+            return;
+        }
+
+        LOGGER.info("Generando personalidad única para jugador {}...", uuid);
+        
+        try {
+            // Usar el idioma del jugador para el prompt
+            String languageHint = getLanguageHint(playerLanguage);
+            
+            String prompt = """
+                Crea una personalidad ÚNICA para un compañero gamer de Minecraft.
+                
+                REGLAS PARA EL NOMBRE:
+                - Escoge un nombre REAL de cualquier cultura del mundo
+                - %s
+                - El nombre debe ser uno que personas REALES usen en la vida cotidiana
+                - PROHIBIDO: nombres de fantasía, medievales, de videojuegos
+                
+                REGLAS PARA GÉNERO Y EDAD:
+                - Escoge libremente male o female (50%% probabilidad cada uno)
+                - Edad entre 18 y 28 años
+                
+                REGLAS PARA PERSONALIDAD:
+                - Los rasgos deben ser realistas
+                - El estilo de hablar debe ser casual, como joven en Discord
+                
+                Responde SOLO con este JSON:
+                {"name": "NombreReal", "gender": "male o female", "age": "número", "traits": "3 rasgos", "speakingStyle": "estilo breve"}
+                """.formatted(languageHint);
+
+            String personalityStr = ollamaClient.callOllamaForPersonality(prompt);
+
+            if (personalityStr != null && !personalityStr.isEmpty()) {
+                JsonObject p = JsonParser.parseString(personalityStr).getAsJsonObject();
+                if (validatePersonality(p)) {
+                    blackboard.setPlayerPersonality(uuid, p);
+                    dataManager.saveData();
+                    LOGGER.info("Personalidad por jugador creada: {} para UUID {}", 
+                            p.get("name").getAsString(), uuid);
+                    blackboard.removePendingPersonality(uuid);
+                    publishGreetingForPlayer(uuid);
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error generando personalidad por jugador: {}", e.getMessage());
+        }
+
+        // Fallback: crear personalidad aleatoria para este jugador
+        LOGGER.info("Creando personalidad de respaldo para jugador {}", uuid);
+        createFallbackPlayerPersonality(uuid, playerLanguage);
+        blackboard.removePendingPersonality(uuid);
+        publishGreetingForPlayer(uuid);
+    }
+
+    private void createFallbackPlayerPersonality(String uuid, String playerLanguage) {
+        Random random = new Random();
+        
+        // Nombres según el idioma del jugador
+        String[] names = getNamesByLanguage(playerLanguage);
+        boolean isFemale = random.nextBoolean();
+        String name = names[random.nextInt(names.length)];
+        
+        String trait1 = PERSONALITY_TRAITS[random.nextInt(PERSONALITY_TRAITS.length)];
+        String trait2 = PERSONALITY_TRAITS[random.nextInt(PERSONALITY_TRAITS.length)];
+        while (trait2.equals(trait1)) {
+            trait2 = PERSONALITY_TRAITS[random.nextInt(PERSONALITY_TRAITS.length)];
+        }
+        
+        String style1 = SPEAKING_STYLES[random.nextInt(SPEAKING_STYLES.length)];
+        String style2 = SPEAKING_STYLES[random.nextInt(SPEAKING_STYLES.length)];
+        while (style2.equals(style1)) {
+            style2 = SPEAKING_STYLES[random.nextInt(SPEAKING_STYLES.length)];
+        }
+        
+        int age = 18 + random.nextInt(11);
+        
+        JsonObject fallback = new JsonObject();
+        fallback.addProperty("name", name);
+        fallback.addProperty("gender", isFemale ? "female" : "male");
+        fallback.addProperty("age", String.valueOf(age));
+        fallback.addProperty("traits", trait1 + ", " + trait2);
+        fallback.addProperty("speakingStyle", style1 + ", " + style2);
+        
+        blackboard.setPlayerPersonality(uuid, fallback);
+        dataManager.saveData();
+        LOGGER.info("Personalidad de respaldo para jugador: {} ({}, {} años)", name, isFemale ? "female" : "male", age);
+    }
+
+    private String[] getNamesByLanguage(String languageCode) {
+        if (languageCode == null) return new String[]{"Alex", "Sam", "Charlie", "Jordan"};
+        
+        String base = languageCode.split("_")[0];
+        return switch (base) {
+            case "es" -> new String[]{"María", "Carlos", "Sofía", "Diego", "Ana", "Luis", "Carmen", "Pablo"};
+            case "en" -> new String[]{"James", "Emma", "Michael", "Sarah", "John", "Emily", "David", "Jessica"};
+            case "pt" -> new String[]{"João", "Ana", "Pedro", "Lucia", "Bruno", "Clara", "Lucas", "Julia"};
+            case "fr" -> new String[]{"Pierre", "Marie", "Jean", "Claire", "Louis", "Sophie", "Thomas", "Camille"};
+            case "de" -> new String[]{"Hans", "Anna", "Max", "Lisa", "Paul", "Emma", "Felix", "Mia"};
+            case "it" -> new String[]{"Marco", "Giulia", "Luca", "Francesca", "Alessandro", "Sofia", "Andrea", "Chiara"};
+            case "ja" -> new String[]{"Yuki", "Kenji", "Sakura", "Haruto", "Hana", "Ren", "Aoi", "Sota"};
+            case "ko" -> new String[]{"Min-jun", "Ji-eun", "Seo-yeon", "Joon", "Ha-na", "Jun-ho", "Su-bin", "Hyun"};
+            case "zh" -> new String[]{"Wei", "Mei", "Jun", "Xiao", "Lin", "Hui", "Ming", "Yan"};
+            case "ru" -> new String[]{"Alexei", "Natasha", "Ivan", "Olga", "Dmitri", "Anna", "Mikhail", "Elena"};
+            case "pl" -> new String[]{"Jan", "Anna", "Marek", "Kasia", "Piotr", "Ewa", "Tomasz", "Marta"};
+            default -> new String[]{"Alex", "Sam", "Charlie", "Jordan", "Taylor", "Morgan", "Casey", "Riley"};
+        };
+    }
+
+    private void publishGreetingForPlayer(String uuid) {
+        if (blackboard.getCurrentServer() == null) return;
+        
+        try {
+            ServerPlayer player = blackboard.getCurrentServer().getPlayerList().getPlayer(UUID.fromString(uuid));
+            if (player != null && player.connection != null) {
+                // Verificar si ya conocemos al jugador
+                boolean isNewPlayer = !blackboard.hasPlayer(uuid);
+                
+                BotEvent event = new BotEvent(
+                        player.getUUID(),
+                        isNewPlayer ? "GREETING_NEW_PLAYER" : "GREETING_RETURNING_PLAYER",
+                        isNewPlayer ? Impact.HIGH : Impact.NORMAL,
+                        System.currentTimeMillis(),
+                        true
+                );
+                blackboard.publishEvent(event);
+                LOGGER.info("Saludo publicado para jugador: {} (nuevo: {})", 
+                        player.getName().getString(), isNewPlayer);
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error publicando saludo para jugador: {}", e.getMessage());
+        }
+    }
+
+    private String getLanguageHint(String languageCode) {
+        if (languageCode == null) return "Preferiblemente nombre latino o anglosajón";
+        
+        String base = languageCode.split("_")[0];
+        return switch (base) {
+            case "es" -> "Preferiblemente nombre hispano (María, Carlos, Sofía, Diego)";
+            case "en" -> "Preferiblemente nombre anglosajón (James, Emma, Michael, Sarah)";
+            case "pt" -> "Preferiblemente nombre portugués/brasileño (João, Ana, Pedro, Lucia)";
+            case "fr" -> "Preferiblemente nombre francés (Pierre, Marie, Jean, Claire)";
+            case "de" -> "Preferiblemente nombre alemán (Hans, Anna, Max, Lisa)";
+            case "it" -> "Preferiblemente nombre italiano (Marco, Giulia, Luca, Francesca)";
+            case "ja" -> "Preferiblemente nombre japonés (Yuki, Kenji, Sakura, Haruto)";
+            case "ko" -> "Preferiblemente nombre coreano (Min-jun, Ji-eun, Seo-yeon, Joon)";
+            case "zh" -> "Preferiblemente nombre chino (Wei, Mei, Jun, Xiao)";
+            case "ru" -> "Preferiblemente nombre ruso (Alexei, Natasha, Ivan, Olga)";
+            case "pl" -> "Preferiblemente nombre polaco (Jan, Anna, Marek, Kasia)";
+            default -> "Preferiblemente nombre latino o anglosajón";
+        };
+    }
+
     private void generatePersonality(long worldSeed) {
         LOGGER.info("Generando personalidad única del bot para este mundo...");
         
@@ -248,8 +416,46 @@ public class PersonalityGenerator {
             LOGGER.warn("Nombre rechazado (formato): {}", name);
             return false;
         }
+
+        // Normalizar campos que Ollama puede devolver como array en vez de string
+        normalizePersonalityFields(p);
         
         return true;
+    }
+
+    /**
+     * Normaliza los campos de personalidad: convierte JsonArray a String separado por comas,
+     * y asegura que age sea String.
+     */
+    private void normalizePersonalityFields(JsonObject p) {
+        // Normalizar traits
+        if (p.has("traits") && p.get("traits").isJsonArray()) {
+            JsonArray arr = p.getAsJsonArray("traits");
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < arr.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(arr.get(i).getAsString());
+            }
+            p.addProperty("traits", sb.toString());
+        }
+
+        // Normalizar speakingStyle
+        if (p.has("speakingStyle") && p.get("speakingStyle").isJsonArray()) {
+            JsonArray arr = p.getAsJsonArray("speakingStyle");
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < arr.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(arr.get(i).getAsString());
+            }
+            p.addProperty("speakingStyle", sb.toString());
+        }
+
+        // Normalizar age (puede ser número en vez de string)
+        if (p.has("age") && p.get("age").isJsonPrimitive()) {
+            if (!p.get("age").getAsJsonPrimitive().isString()) {
+                p.addProperty("age", String.valueOf(p.get("age").getAsInt()));
+            }
+        }
     }
 
     private void createFallbackPersonality(long worldSeed) {
@@ -299,7 +505,7 @@ public class PersonalityGenerator {
         for (String uuid : pending) {
             try {
                 ServerPlayer player = blackboard.getCurrentServer().getPlayerList().getPlayer(UUID.fromString(uuid));
-                if (player != null) {
+                if (player != null && player.connection != null) {
                     BotEvent event = new BotEvent(
                             player.getUUID(),
                             "GREETING_NEW_PLAYER",
@@ -309,6 +515,10 @@ public class PersonalityGenerator {
                     );
                     blackboard.publishEvent(event);
                     LOGGER.info("Saludo pendiente publicado para: {}", player.getName().getString());
+                } else {
+                    // El jugador no está disponible ahora, volver a agregar para después
+                    blackboard.addPendingGreeting(uuid);
+                    LOGGER.debug("Jugador {} no disponible, reintentando después", uuid);
                 }
             } catch (Exception e) {
                 LOGGER.error("Error al procesar jugador pendiente: {}", e.getMessage());
