@@ -31,20 +31,13 @@ public class CombatObserver {
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (!(entity instanceof ServerPlayer player)) return;
 
-            // Usar el mensaje real del juego (ej: "Player246 fue empujado desde muy alto por Crepitante")
-            String prompt;
-            try {
-                String deathMessage = player.getCombatTracker().getDeathMessage().getString();
-                String mcName = player.getName().getString();
-                // Reemplazar el nombre de MC con [nombre] para que el controller ponga el nombre real
-                prompt = deathMessage.replace(mcName, "[nombre]") + " ¡Reacciona!";
-            } catch (Exception e) {
-                // Fallback si el CombatTracker falla
-                String cause = damageSource.getMsgId();
-                String attackerName = damageSource.getEntity() != null
-                        ? damageSource.getEntity().getName().getString() : null;
-                prompt = buildDeathFallback(cause, attackerName);
-            }
+            String cause = damageSource.getMsgId();
+
+            // Extraer nombre del atacante (funciona bien server-side, confirmado con mobs)
+            String attackerName = damageSource.getEntity() != null
+                    ? damageSource.getEntity().getName().getString() : null;
+
+            String prompt = buildDeathPrompt(cause, attackerName);
 
             BotEvent event = new BotEvent(
                     player.getUUID(),
@@ -59,31 +52,51 @@ public class CombatObserver {
     }
 
     /**
-     * Fallback en caso de que getCombatTracker falle.
+     * Construye un prompt de muerte rico usando damageSource (más confiable que getCombatTracker).
      */
-    private String buildDeathFallback(String cause, String attackerName) {
-        String base = "[nombre] acaba de morir";
-        if (attackerName != null) {
-            base += " por culpa de " + attackerName;
-        }
-        base += switch (cause) {
-            case "fall" -> " por una caída";
-            case "drown" -> " ahogado";
-            case "lava" -> " en lava";
-            case "inFire", "onFire" -> " quemado";
-            case "explosion", "explosion.player" -> " por una explosión";
-            case "starve" -> " de hambre";
-            case "mob" -> " por un mob";
-            case "player" -> " por otro jugador";
-            case "arrow" -> " por una flecha";
-            case "magic" -> " por magia";
-            case "wither" -> " por efecto wither";
-            case "lightningBolt" -> " por un rayo";
-            case "outOfWorld" -> " al caer al vacío";
-            case "flyIntoWall" -> " al estrellarse con la elytra";
-            default -> " (" + cause + ")";
+    private String buildDeathPrompt(String cause, String attackerName) {
+        String prompt = switch (cause) {
+            case "mob" -> attackerName != null
+                    ? "¡" + attackerName + " acaba de matar a [nombre]!"
+                    : "¡Un mob acaba de matar a [nombre]!";
+            case "player" -> attackerName != null
+                    ? "¡" + attackerName + " (otro jugador) acaba de matar a [nombre]!"
+                    : "¡Otro jugador acaba de matar a [nombre]!";
+            case "arrow" -> attackerName != null
+                    ? "¡" + attackerName + " mató a [nombre] con una flecha!"
+                    : "¡[nombre] murió atravesado por una flecha!";
+            case "fall" -> "[nombre] murió por caída desde muy alto.";
+            case "outOfWorld" -> "¡[nombre] cayó al vacío y murió!";
+            case "drown" -> "¡[nombre] se ahogó!";
+            case "lava" -> "¡[nombre] cayó en lava y murió!";
+            case "inFire", "onFire" -> "¡[nombre] murió quemado!";
+            case "explosion", "explosion.player" -> attackerName != null
+                    ? "¡[nombre] murió por la explosión de " + attackerName + "!"
+                    : "¡[nombre] murió por una explosión!";
+            case "starve" -> "[nombre] murió de hambre.";
+            case "magic" -> attackerName != null
+                    ? "¡[nombre] murió por magia de " + attackerName + "!"
+                    : "[nombre] murió por magia.";
+            case "wither" -> "[nombre] murió por efecto wither.";
+            case "anvil" -> "¡Un yunque aplastó a [nombre]!";
+            case "fallingBlock" -> "¡Un bloque cayó sobre [nombre] y lo mató!";
+            case "flyIntoWall" -> "¡[nombre] se estrelló volando con la elytra!";
+            case "lightningBolt" -> "¡Un rayo fulminó a [nombre]!";
+            case "cactus" -> "¡[nombre] murió pinchado por un cactus!";
+            case "freeze" -> "¡[nombre] murió congelado!";
+            case "hotFloor" -> "¡[nombre] murió por caminar sobre magma!";
+            case "dragonBreath" -> "¡[nombre] murió por el aliento del dragón!";
+            case "thorns" -> attackerName != null
+                    ? "[nombre] murió por las espinas de " + attackerName + "."
+                    : "[nombre] murió por daño de espinas.";
+            default -> {
+                if (attackerName != null) {
+                    yield "[nombre] murió (" + cause + ") por culpa de " + attackerName + ".";
+                }
+                yield "[nombre] acaba de morir (" + cause + ").";
+            }
         };
-        return base + ". ¡Reacciona!";
+        return prompt + " ¡Reacciona!";
     }
 
     private void registerPlayerDamage() {

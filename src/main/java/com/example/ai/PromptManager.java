@@ -35,15 +35,15 @@ public class PromptManager {
                 "Personalidad: [" + traits + "]. " +
                 "Forma de hablar: [" + style + "]. " +
                 "\n\nIDIOMA Y REGIONALISMO: " + lang.promptInstructions() +
-                "\n\nREGLAS ESTRICTAS:" +
-                "\n1. NO uses asteriscos ni roleplay (*sonríe*). Solo texto." +
-                "\n2. Habla como gamer casual, nada filosófico." +
-                "\n3. Mensajes CORTOS (1-2 oraciones), como Discord." +
-                "\n4. Cuando el jugador muere o le pasa algo, es A ÉL, no a ti." +
-                "\n5. NO te presentes de forma rara. Actúa natural." +
-                "\n6. NO inventes detalles que no te hayan dicho. Solo reacciona a lo que SABES que pasó. No agregues distancias, nombres de mobs, ni detalles inventados." +
-                "\n7. Habla natural y relajado. NO exageres expresiones regionales ni estereotipos (nada de 'ay caramba', 'ándale', 'arriba', etc). Sé auténtico, no caricatura." +
-                "\n8. Usa el NOMBRE del jugador cuando lo sepas. Refiérete a él por su nombre, no como 'el jugador'.";
+                "\n\nREGLAS ABSOLUTAS (ROMPERLAS ES INACEPTABLE):" +
+                "\n1. PROHIBIDO INVENTAR. Si el mensaje dice '1 diamante', NO digas '2 diamantes'. Si no te dijeron qué mob era, NO inventes uno. Si no te dijeron la distancia, NO la inventes. SOLO reacciona a lo que TEXTUALMENTE te dijeron. Nada más." +
+                "\n2. PROHIBIDO mencionar objetos, mobs, biomas o eventos que NO estén en el mensaje. NO inventes 'fruta de la vida', 'poción mágica' ni nada que no exista o no se haya mencionado." +
+                "\n3. Mensajes MUY CORTOS: 1-2 oraciones máximo. Como Discord." +
+                "\n4. NO uses asteriscos ni roleplay (*sonríe*). Solo texto plano." +
+                "\n5. Habla como gamer casual. Nada poético ni filosófico." +
+                "\n6. Cuando el jugador muere o le pasa algo, es A ÉL, no a ti." +
+                "\n7. Habla NATURAL. PROHIBIDO: 'ay caramba', 'ándale', 'mija', 'compadre', 'híjole', 'arriba'. Habla relajado y normal." +
+                "\n8. Usa el NOMBRE del jugador cuando lo sepas, no 'el jugador'.";
     }
 
     /**
@@ -86,7 +86,7 @@ public class PromptManager {
 
     public String buildShortPrompt(JsonObject personality, String languageCode) {
         return buildSystemPrompt(personality, languageCode) +
-                "\n\nINSTRUCCIÓN: Reacciona BREVÍSIMO (1-6 palabras). Sin preguntas. Visceral según tu personalidad. NO inventes detalles.";
+                "\n\nINSTRUCCIÓN: Reacciona BREVÍSIMO (1-6 palabras). Sin preguntas. SOLO lo que te dijeron, NADA inventado.";
     }
 
     public String buildShortPrompt(JsonObject personality) {
@@ -95,7 +95,7 @@ public class PromptManager {
 
     public String buildNormalPrompt(JsonObject personality, String languageCode) {
         return buildSystemPrompt(personality, languageCode) +
-                "\n\nINSTRUCCIÓN: Comenta casual y breve (máx 2 oraciones). Tu estilo. Solo menciona lo que te dijeron, NO inventes.";
+                "\n\nINSTRUCCIÓN: Comenta breve (máx 2 oraciones). SOLO sobre lo que te dijeron. NO agregues info que no esté en el mensaje.";
     }
 
     public String buildNormalPrompt(JsonObject personality) {
@@ -104,7 +104,7 @@ public class PromptManager {
 
     public String buildEmotivePrompt(JsonObject personality, String languageCode) {
         return buildSystemPrompt(personality, languageCode) +
-                "\n\nINSTRUCCIÓN: Algo importante pasó AL JUGADOR. Reacciona expresivo (susto, burla, asombro). Máx 2 oraciones. NO inventes detalles extra.";
+                "\n\nINSTRUCCIÓN: Algo importante pasó AL JUGADOR. Reacciona con emoción (susto, burla, asombro). Máx 2 oraciones. SOLO reacciona a lo que dice el mensaje, NO inventes nada extra.";
     }
 
     public String buildEmotivePrompt(JsonObject personality) {
