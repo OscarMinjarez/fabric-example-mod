@@ -41,6 +41,7 @@ public class ExampleMod implements ModInitializer {
     private static final long SPONTANEOUS_COOLDOWN_MS = 120_000; // 2 minutos
     private static final long SPONT_MIN_MS = 7 * 60_000L;
     private static final long SPONT_MAX_MS = 16 * 60_000L;
+    private static final long HIGH_EVENT_COOLDOWN_MS = 8_000; // 8 segundos entre eventos HIGH
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -51,17 +52,18 @@ public class ExampleMod implements ModInitializer {
     private JsonObject botData;
     private MinecraftServer currentServer;
 
-    private final Set<String> awaitingName      = Collections.synchronizedSet(new HashSet<>());
-    private final Set<String> pendingGreeting   = Collections.synchronizedSet(new HashSet<>());
-    private final Map<String, Long>    lastSpontaneousMs = new ConcurrentHashMap<>();
-    private final Map<String, String>  lastBiome         = new ConcurrentHashMap<>();
-    private final Map<String, String>  lastDimension     = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> dangerWarned      = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> lowHealthWarned   = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> lowFoodWarned     = new ConcurrentHashMap<>();
-    private final Map<String, Long>    nextSpontMs       = new ConcurrentHashMap<>();
+    private final Set<String> awaitingName        = Collections.synchronizedSet(new HashSet<>());
+    private final Set<String> pendingGreeting      = Collections.synchronizedSet(new HashSet<>());
+    private final Map<String, Long>    lastSpontaneousMs  = new ConcurrentHashMap<>();
+    private final Map<String, Long>    lastHighEventMs    = new ConcurrentHashMap<>();
+    private final Map<String, String>  lastBiome          = new ConcurrentHashMap<>();
+    private final Map<String, String>  lastDimension      = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> dangerWarned       = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> lowHealthWarned    = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> lowFoodWarned      = new ConcurrentHashMap<>();
+    private final Map<String, Long>    nextSpontMs        = new ConcurrentHashMap<>();
 
-    private long lastDayTime   = -1;
+    private long lastDayTime      = -1;
     private boolean wasRaining    = false;
     private boolean wasThundering = false;
     private int tickCounter = 0;
@@ -75,9 +77,6 @@ public class ExampleMod implements ModInitializer {
 
     private enum Impact { LOW, NORMAL, HIGH }
 
-    // ════════════════════════════════════════════════════════════
-    //  onInitialize
-    // ════════════════════════════════════════════════════════════
     @Override
     public void onInitialize() {
 
@@ -149,9 +148,11 @@ public class ExampleMod implements ModInitializer {
                         newPlayer.add("history", new JsonArray());
                         players.add(uuid, newPlayer);
                         isAwaitingName = true;
-                        systemPrompt   = buildEmotivePrompt() + " El jugador acaba de decirte que se llama " + content + ".";
-                        historyCopy    = new JsonArray();
-                        playerName     = content;
+                        // FIX: dejar claro quién es quién para que el modelo no se confunda
+                        systemPrompt = buildEmotivePrompt() +
+                                " TÚ eres " + botName + ". El jugador que está hablando contigo acaba de decirte que su nombre es '" + content + "'. Salúdalo por su nombre con entusiasmo.";
+                        historyCopy = new JsonArray();
+                        playerName  = content;
                     } else {
                         isAwaitingName = false;
                         JsonObject playerData = players.getAsJsonObject(uuid);
@@ -185,29 +186,28 @@ public class ExampleMod implements ModInitializer {
         });
 
         // ── Muerte del jugador ──
-        // Registrado PRIMERO para que tenga prioridad sobre el handler de kills de mobs
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (!(entity instanceof ServerPlayer player)) return;
             String cause = damageSource.getMsgId();
             String prompt = switch (cause) {
-                case "fall"                    -> "[nombre] murió cayendo al vacío";
-                case "drown"                   -> "[nombre] se ahogó";
+                case "fall"                    -> "Acabas de ver cómo [nombre] murió cayendo al vacío. Reacciona.";
+                case "drown"                   -> "¡[nombre] se acaba de ahogar! Reacciona.";
                 case "explosion",
-                     "explosion.player"        -> "[nombre] explotó";
-                case "inFire", "onFire"        -> "[nombre] murió quemado";
-                case "starve"                  -> "[nombre] murió de hambre";
-                case "lava"                    -> "[nombre] cayó en lava";
-                case "mob"                     -> "[nombre] fue asesinado por un mob";
-                case "player"                  -> "[nombre] fue asesinado por otro jugador";
-                case "arrow"                   -> "[nombre] fue atravesado por una flecha";
-                case "magic"                   -> "[nombre] murió por magia";
-                case "wither"                  -> "[nombre] murió por el efecto wither";
-                case "anvil"                   -> "[nombre] fue aplastado por un yunque";
-                case "fallingBlock"            -> "[nombre] fue aplastado por un bloque";
-                case "flyIntoWall"             -> "[nombre] voló contra una pared con elytra";
-                case "outOfWorld"              -> "[nombre] cayó al vacío";
-                case "lightningBolt"           -> "[nombre] fue fulminado por un rayo";
-                default                        -> "[nombre] murió (" + cause + ")";
+                     "explosion.player"        -> "¡[nombre] explotó frente a ti! Reacciona.";
+                case "inFire", "onFire"        -> "¡[nombre] murió quemado! Reacciona.";
+                case "starve"                  -> "[nombre] murió de hambre. Reacciona según tu personalidad.";
+                case "lava"                    -> "¡[nombre] cayó en lava y murió! Reacciona.";
+                case "mob"                     -> "Un mob acaba de matar a [nombre]. Reacciona.";
+                case "player"                  -> "¡Otro jugador acaba de matar a [nombre]! Reacciona.";
+                case "arrow"                   -> "¡[nombre] fue atravesado por una flecha! Reacciona.";
+                case "magic"                   -> "[nombre] murió por magia. Reacciona.";
+                case "wither"                  -> "El efecto wither acaba de matar a [nombre]. Reacciona.";
+                case "anvil"                   -> "¡Un yunque aplastó a [nombre]! Reacciona.";
+                case "fallingBlock"            -> "¡Un bloque aplastó a [nombre]! Reacciona.";
+                case "flyIntoWall"             -> "¡[nombre] voló contra una pared con la elytra! Reacciona.";
+                case "outOfWorld"              -> "¡[nombre] cayó al vacío! Reacciona.";
+                case "lightningBolt"           -> "¡Un rayo fulminó a [nombre]! Reacciona.";
+                default                        -> "Acabas de ver cómo [nombre] murió (" + cause + "). Reacciona.";
             };
             reactToEventAsync(player, prompt, Impact.HIGH, true);
         });
@@ -216,7 +216,7 @@ public class ExampleMod implements ModInitializer {
         ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamageTaken, damageTaken, blocked) -> {
             if (entity instanceof ServerPlayer player && baseDamageTaken >= 7.0f) {
                 if (ThreadLocalRandom.current().nextInt(100) < 30)
-                    reactToEventAsync(player, "[nombre] recibió un golpe fuerte", Impact.NORMAL);
+                    reactToEventAsync(player, "¡[nombre] acaba de recibir un golpe brutal!", Impact.NORMAL);
             }
         });
 
@@ -226,14 +226,14 @@ public class ExampleMod implements ModInitializer {
             String reaction = null;
             Impact impact   = Impact.NORMAL;
             if (state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE)) {
-                reaction = "[nombre] encontró diamantes"; impact = Impact.HIGH;
+                reaction = "¡[nombre] acaba de encontrar diamantes! Reacciona con emoción."; impact = Impact.HIGH;
             } else if (state.is(Blocks.ANCIENT_DEBRIS)) {
-                reaction = "[nombre] encontró ancient debris"; impact = Impact.HIGH;
+                reaction = "¡[nombre] encontró ancient debris en el Nether! Reacciona."; impact = Impact.HIGH;
             } else if (state.is(Blocks.EMERALD_ORE) || state.is(Blocks.DEEPSLATE_EMERALD_ORE)) {
                 if (ThreadLocalRandom.current().nextInt(100) < 40)
-                    reaction = "[nombre] encontró esmeraldas";
+                    reaction = "[nombre] encontró esmeraldas. Comenta algo breve.";
             } else if (state.is(Blocks.SPAWNER)) {
-                reaction = "[nombre] encontró un spawner";
+                reaction = "¡[nombre] acaba de encontrar un spawner! Reacciona.";
             }
             if (reaction != null) reactToEventAsync(serverPlayer, reaction, impact);
         });
@@ -245,20 +245,20 @@ public class ExampleMod implements ModInitializer {
             int tick = ++tickCounter;
             if (tick % 40 != 0) return;
 
-            long dayTime      = server.overworld().getDayTime() % 24000;
+            long dayTime         = server.overworld().getDayTime() % 24000;
             boolean isRaining    = server.overworld().isRaining();
             boolean isThundering = server.overworld().isThundering();
             if (lastDayTime >= 0) {
                 if (lastDayTime < 12500 && dayTime >= 12500 && dayTime < 13500)
-                    reactToWorldEventAsync("anocheció", 25, Impact.LOW);
+                    reactToWorldEventAsync("Acaba de anochecer en el servidor. Comenta algo breve sobre la noche.", 25, Impact.LOW);
                 if (lastDayTime >= 22500 && dayTime < 1000)
-                    reactToWorldEventAsync("amaneció", 20, Impact.LOW);
+                    reactToWorldEventAsync("Acaba de amanecer. Di algo corto.", 20, Impact.LOW);
                 if (!wasRaining && isRaining && !isThundering)
-                    reactToWorldEventAsync("empezó a llover", 30, Impact.LOW);
+                    reactToWorldEventAsync("Empezó a llover en el servidor. Comenta algo.", 30, Impact.LOW);
                 if (!wasThundering && isThundering)
-                    reactToWorldEventAsync("tormenta eléctrica", 50, Impact.NORMAL);
+                    reactToWorldEventAsync("¡Hay tormenta eléctrica! Reacciona.", 50, Impact.NORMAL);
                 if (wasRaining && !isRaining)
-                    reactToWorldEventAsync("dejó de llover", 15, Impact.LOW);
+                    reactToWorldEventAsync("Dejó de llover. Di algo corto.", 15, Impact.LOW);
             }
             lastDayTime = dayTime; wasRaining = isRaining; wasThundering = isThundering;
 
@@ -272,26 +272,26 @@ public class ExampleMod implements ModInitializer {
         // ── Kills de mobs ──
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (!(damageSource.getEntity() instanceof ServerPlayer player)) return;
-            if (entity instanceof ServerPlayer) return; // ya cubierto arriba
+            if (entity instanceof ServerPlayer) return;
             String className = entity.getClass().getSimpleName();
             String mobName   = className.toLowerCase().replace("boss", "").trim();
             String prompt;
             Impact impact = Impact.NORMAL;
             if (className.equals("EnderDragon")) {
-                prompt = "[nombre] mató al Ender Dragon"; impact = Impact.HIGH;
+                prompt = "¡[nombre] acaba de matar al Ender Dragon! Reacciona con asombro total."; impact = Impact.HIGH;
             } else if (className.equals("WitherBoss")) {
-                prompt = "[nombre] derrotó al Wither"; impact = Impact.HIGH;
+                prompt = "¡[nombre] derrotó al Wither! Reacciona."; impact = Impact.HIGH;
             } else if (className.equals("ElderGuardian")) {
-                prompt = "[nombre] derrotó al Elder Guardian"; impact = Impact.HIGH;
+                prompt = "¡[nombre] derrotó al Elder Guardian! Reacciona."; impact = Impact.HIGH;
             } else if (className.equals("Evoker")) {
-                prompt = "[nombre] mató a un Evoker";
+                prompt = "[nombre] mató a un Evoker. Comenta algo.";
             } else if (className.equals("Creeper")) {
                 if (ThreadLocalRandom.current().nextInt(100) < 25) {
-                    prompt = "[nombre] mató un creeper"; impact = Impact.LOW;
+                    prompt = "[nombre] mató un creeper. Comenta brevemente."; impact = Impact.LOW;
                 } else return;
             } else {
                 if (ThreadLocalRandom.current().nextInt(100) >= 8) return;
-                prompt = "[nombre] mató a un " + mobName; impact = Impact.LOW;
+                prompt = "[nombre] mató a un " + mobName + ". Di algo corto."; impact = Impact.LOW;
             }
             reactToEventAsync(player, prompt, impact);
         });
@@ -338,7 +338,6 @@ public class ExampleMod implements ModInitializer {
                 String reply = callOllama(sPrompt, userPrompt, historyCopy);
                 synchronized (ExampleMod.this) {
                     if (!isNewPlayer) { addHistory(uuid, "assistant", reply); saveData(); }
-                    // El saludo NO actualiza lastSpontaneousMs — no queremos bloquear eventos inmediatos
                 }
                 player.sendSystemMessage(Component.literal("§9" + bName + ": §f" + reply));
             } catch (Exception e) {
@@ -365,8 +364,13 @@ public class ExampleMod implements ModInitializer {
             JsonObject players = botData.getAsJsonObject("players");
             if (!players.has(uuid)) return;
 
-            // neverIgnore=true (HIGH) salta todos los filtros
-            if (!neverIgnore) {
+            if (neverIgnore) {
+                // FIX: cooldown mínimo entre eventos HIGH para evitar mensajes duplicados
+                long now2 = System.currentTimeMillis();
+                Long lastHigh = lastHighEventMs.get(uuid);
+                if (lastHigh != null && (now2 - lastHigh) < HIGH_EVENT_COOLDOWN_MS) return;
+                lastHighEventMs.put(uuid, now2);
+            } else {
                 if (!canSendSpontaneous(uuid)) return;
                 int silenceChance = switch (impact) {
                     case LOW    -> 65;
@@ -376,7 +380,6 @@ public class ExampleMod implements ModInitializer {
                 if (ThreadLocalRandom.current().nextInt(100) < silenceChance) return;
             }
 
-            // Marcar cooldown DESPUÉS de pasar los filtros
             lastSpontaneousMs.put(uuid, System.currentTimeMillis());
 
             JsonObject pd = players.getAsJsonObject(uuid);
@@ -549,9 +552,9 @@ public class ExampleMod implements ModInitializer {
             String prev    = lastDimension.get(uuid);
             if (prev != null && !current.equals(prev)) {
                 String prompt = switch (current) {
-                    case "the_nether" -> "[nombre] entró al Nether";
-                    case "the_end"    -> "[nombre] entró al End";
-                    case "overworld"  -> "[nombre] volvió del " + prev.replace("the_", "").replace("_", " ");
+                    case "the_nether" -> "¡[nombre] acaba de entrar al Nether! Reacciona.";
+                    case "the_end"    -> "¡[nombre] entró al End! Reacciona con intensidad.";
+                    case "overworld"  -> "[nombre] volvió del " + prev.replace("the_", "").replace("_", " ") + ". Comenta algo.";
                     default -> null;
                 };
                 if (prompt != null) reactToEventAsync(player, prompt);
@@ -579,8 +582,8 @@ public class ExampleMod implements ModInitializer {
                     dangerWarned.put(uuid, true);
                     String mobName = hostiles.get(0).getClass().getSimpleName().toLowerCase();
                     String prompt  = hostiles.size() > 3
-                            ? hostiles.size() + " mobs hostiles cerca de [nombre]"
-                            : mobName + " cerca de [nombre]";
+                            ? "¡Hay " + hostiles.size() + " mobs hostiles rodeando a [nombre]! Avísale."
+                            : "¡Hay un " + mobName + " rondando cerca de [nombre]! Avísale.";
                     reactToEventAsync(player, prompt);
                 } else if (!danger) {
                     dangerWarned.put(uuid, false);
@@ -604,7 +607,7 @@ public class ExampleMod implements ModInitializer {
             if (isLow && !wasLow) {
                 lowHealthWarned.put(uuid, true);
                 int hearts = (int) Math.ceil(health / 2);
-                reactToEventAsync(player, "[nombre] tiene solo " + hearts + " corazones", Impact.HIGH, true);
+                reactToEventAsync(player, "¡[nombre] está casi muerto, le quedan solo " + hearts + " corazones! Reacciona ya.", Impact.HIGH, true);
             } else if (!isLow) {
                 lowHealthWarned.put(uuid, false);
             }
@@ -623,7 +626,7 @@ public class ExampleMod implements ModInitializer {
             boolean wasLow = lowFoodWarned.getOrDefault(uuid, false);
             if (isLow && !wasLow) {
                 lowFoodWarned.put(uuid, true);
-                reactToEventAsync(player, "[nombre] tiene hambre", Impact.HIGH, true);
+                reactToEventAsync(player, "¡[nombre] se está muriendo de hambre! Reacciona.", Impact.HIGH, true);
             } else if (!isLow) {
                 lowFoodWarned.put(uuid, false);
             }
@@ -651,7 +654,7 @@ public class ExampleMod implements ModInitializer {
                             dayTime < 18000 ? "anocheció" : "es medianoche";
             String biome = getBiomeName(player).replace("_", " ");
             String dim   = getDimensionName(player).replace("the_", "").replace("_", " ");
-            reactToEventAsync(player, dim + ", " + timeDesc + ", " + biome);
+            reactToEventAsync(player, "Estás en el " + dim + ", " + timeDesc + ", en un bioma de " + biome + ". Di algo espontáneo y natural sobre lo que estás viviendo ahora mismo.");
         }
     }
 
@@ -687,23 +690,36 @@ public class ExampleMod implements ModInitializer {
     }
 
     private String buildSystemPrompt() {
-        JsonObject p  = botData.getAsJsonObject("personality");
+        JsonObject p = botData.getAsJsonObject("personality");
         String genero = p.get("gender").getAsString().equals("female") ? "mujer" : "hombre";
-        return "Eres " + p.get("name").getAsString() + ", " + genero + " de " + p.get("age").getAsString() + " años, compañero de Minecraft de " + p.get("name").getAsString() + ". " +
-                "Carácter: " + p.get("traits").getAsString() + ". " +
-                "Hablas así: " + p.get("speakingStyle").getAsString() + ". " +
-                "CÓMO REACCIONAR: Cuando algo le pasa al jugador, reacciona como un amigo presente que lo VIO pasar. " +
-                "Si muere: sorpresa, burla amistosa o preocupación genuina según tu carácter. " +
-                "Si encuentra algo bueno: emoción real, no análisis. " +
-                "Si está en peligro: alerta directa, no filosofía. " +
-                "REGLAS: Sin asteriscos ni acciones entre asteriscos. Sin preguntas filosóficas. " +
-                "Una sola idea por mensaje. Máximo 2 frases. Habla como amigo por chat, directo y natural. " +
-                "Usa el idioma del jugador.";
+        String botName = p.get("name").getAsString();
+        String traits = p.get("traits").getAsString();
+        String style = p.get("speakingStyle").getAsString();
+
+        return "Tu nombre es " + botName + ". Eres " + genero + " de " + p.get("age").getAsString() + " años. " +
+                "Eres una PERSONA REAL jugando Minecraft en un servidor multijugador, NO ERES UNA INTELIGENCIA ARTIFICIAL, ni un asistente, ni un NPC. " +
+                "Tu personalidad EXACTA es: [" + traits + "]. Debes actuar siempre basándote en esto. " +
+                "Tu forma de escribir en el chat debe ser: [" + style + "]. " +
+                "\n\nREGLAS ESTRICTAS E INQUEBRANTABLES PARA EL CHAT:" +
+                "\n1. PROHIBIDO el roleplay. NUNCA uses asteriscos ni paréntesis para describir acciones (ej. *sonríe*, *te mira*). Solo escribe texto plano." +
+                "\n2. PROHIBIDO ser filosófico, dar sermones o hacer análisis profundos. Eres un gamer, actúa como tal." +
+                "\n3. NUNCA ofrezcas ayuda ni digas '¿En qué te puedo ayudar?'. NUNCA hables por el otro jugador." +
+                "\n4. Tus mensajes deben ser MUY CORTOS (1 o 2 oraciones máximo), como mensajes rápidos en Discord o chat del juego." +
+                "\n5. Si tu personalidad es sarcástica, búrlate. Si eres miedoso, asústate. Si eres gruñón, quéjate. No tienes que ser siempre amable o positivo." +
+                "\n6. Usa el idioma español coloquial y natural.";
     }
 
-    private String buildShortPrompt()   { return buildSystemPrompt() + " Responde en máximo 6 palabras. Solo una reacción rápida."; }
-    private String buildNormalPrompt()  { return buildSystemPrompt() + " Responde natural, 1-2 frases máximo."; }
-    private String buildEmotivePrompt() { return buildSystemPrompt() + " Este es un momento importante. Puedes ser más expresivo, 1-3 frases."; }
+    private String buildShortPrompt() {
+        return buildSystemPrompt() + "\n\nINSTRUCCIÓN ACTUAL: Reacciona al siguiente evento de forma EXTREMADAMENTE CORTA (1 a 6 palabras máximo). Reacciona visceralmente según tu personalidad. PROHIBIDO HACER PREGUNTAS.";
+    }
+
+    private String buildNormalPrompt() {
+        return buildSystemPrompt() + "\n\nINSTRUCCIÓN ACTUAL: Responde o comenta de forma natural y casual al jugador en máximo 2 oraciones. Recuerda usar tu estilo de hablar.";
+    }
+
+    private String buildEmotivePrompt() {
+        return buildSystemPrompt() + "\n\nINSTRUCCIÓN ACTUAL: Ha ocurrido algo importante. Reacciona de forma expresiva y humana (susto, burla, asombro, enojo) basándote estrictamente en tu personalidad. Máximo 2 oraciones cortas.";
+    }
 
     private void addHistory(String uuid, String role, String content) {
         JsonObject players = botData.getAsJsonObject("players");
@@ -749,6 +765,7 @@ public class ExampleMod implements ModInitializer {
         awaitingName.clear();
         pendingGreeting.clear();
         lastSpontaneousMs.clear();
+        lastHighEventMs.clear();
         lastBiome.clear();
         lastDimension.clear();
         dangerWarned.clear();
