@@ -262,7 +262,10 @@ public class BotController {
         String botName = personality.get("name").getAsString();
         String language = blackboard.getPlayerLanguage(uuid);
         LanguageProfile langProfile = LanguageManager.getProfile(language);
-        String systemPrompt = promptManager.buildSystemPrompt(personality, language) + langProfile.getPlayerNameContext(playerName);
+        String playerContext = buildPlayerContext(player);
+        String systemPrompt = promptManager.buildSystemPrompt(personality, language)
+                + langProfile.getPlayerNameContext(playerName)
+                + playerContext;
         blackboard.addPlayerHistory(uuid, "user", message, ollamaClient.getMaxHistory());
         JsonArray history = blackboard.getPlayerHistory(uuid);
         try {
@@ -283,7 +286,9 @@ public class BotController {
         if (playerName == null) return;
         String botName = personality.get("name").getAsString();
         String language = blackboard.getPlayerLanguage(uuid);
-        String systemPrompt = promptManager.buildPromptWithPlayerName(personality, event.impact(), playerName, language);
+        String playerContext = buildPlayerContext(player);
+        String systemPrompt = promptManager.buildPromptWithPlayerName(personality, event.impact(), playerName, language)
+                + playerContext;
         JsonArray history = blackboard.getPlayerHistory(uuid);
         String prompt = event.prompt().replace("[nombre]", playerName);
         LOGGER.debug("Prompt con nombre reemplazado: {}", prompt);
@@ -303,6 +308,49 @@ public class BotController {
             LOGGER.info("[{}] {}: {}", playerName, botName, reply);
         } catch (Exception e) {
             LOGGER.error("Error en reacción a evento: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Construye un resumen del estado actual del jugador para dar contexto a la IA.
+     */
+    private String buildPlayerContext(ServerPlayer player) {
+        try {
+            int hearts = (int) Math.ceil(player.getHealth() / 2);
+            int maxHearts = (int) Math.ceil(player.getMaxHealth() / 2);
+            int food = player.getFoodData().getFoodLevel();
+
+            long dayTime = ((net.minecraft.server.level.ServerLevel) player.level()).getDayTime() % 24000;
+            String timeDesc = dayTime < 1000 ? "amanecer" : dayTime < 6000 ? "mañana" :
+                    dayTime < 12000 ? "mediodía" : dayTime < 13500 ? "atardecer" :
+                            dayTime < 18000 ? "noche" : "medianoche";
+
+            String biome = "desconocido";
+            try {
+                var keyOpt = player.level().getBiome(player.blockPosition()).unwrapKey();
+                if (keyOpt.isPresent()) {
+                    String keyStr = keyOpt.get().toString();
+                    if (keyStr.contains(" / ")) {
+                        String path = keyStr.substring(keyStr.lastIndexOf(" / ") + 3).replace("]", "").trim();
+                        biome = (path.contains(":") ? path.substring(path.indexOf(':') + 1) : path).replace("_", " ");
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            String dim = "overworld";
+            try {
+                var d = player.level().dimension();
+                if (d.equals(net.minecraft.world.level.Level.NETHER)) dim = "nether";
+                else if (d.equals(net.minecraft.world.level.Level.END)) dim = "end";
+            } catch (Exception ignored) {}
+
+            return "\n[Estado del jugador: " + hearts + "/" + maxHearts + " corazones, " +
+                    "hambre " + food + "/20, " +
+                    "hora: " + timeDesc + ", " +
+                    "bioma: " + biome + ", " +
+                    "dimensión: " + dim + "]";
+        } catch (Exception e) {
+            return "";
         }
     }
 

@@ -15,7 +15,9 @@ public class LanguageManager {
         PROFILES.put("es_mx", new LanguageProfile(
             "es_mx", "Español (México)", "español mexicano",
             "Habla en español natural de México. Tutea. " +
-            "Evita expresiones de España ('tío', 'mola', 'vosotros'). Sé casual pero sin forzar modismos."
+            "Evita expresiones de España ('tío', 'mola', 'vosotros'). " +
+            "NO uses frases estereotípicas ('ay caramba', 'ándale', 'arriba', 'órale', 'híjole'). " +
+            "Habla como un joven mexicano real en internet: relajado, directo y natural."
         ));
         
         PROFILES.put("es_es", new LanguageProfile(

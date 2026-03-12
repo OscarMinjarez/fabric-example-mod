@@ -39,19 +39,20 @@ public class PlayerStatusObserver {
 
             String reaction = null;
             Impact impact = Impact.NORMAL;
+            int y = pos.getY();
 
             if (state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE)) {
-                reaction = "¡[nombre] acaba de encontrar diamantes! Reacciona con emoción.";
+                reaction = "¡[nombre] acaba de encontrar diamantes a Y=" + y + "! Reacciona con emoción.";
                 impact = Impact.HIGH;
             } else if (state.is(Blocks.ANCIENT_DEBRIS)) {
-                reaction = "¡[nombre] encontró ancient debris en el Nether! Reacciona.";
+                reaction = "¡[nombre] encontró ancient debris a Y=" + y + " en el Nether! Reacciona.";
                 impact = Impact.HIGH;
             } else if (state.is(Blocks.EMERALD_ORE) || state.is(Blocks.DEEPSLATE_EMERALD_ORE)) {
                 if (ThreadLocalRandom.current().nextInt(100) < 40) {
-                    reaction = "[nombre] encontró esmeraldas. Comenta algo breve.";
+                    reaction = "[nombre] encontró esmeraldas a Y=" + y + ". Comenta algo breve.";
                 }
             } else if (state.is(Blocks.SPAWNER)) {
-                reaction = "¡[nombre] acaba de encontrar un spawner! Reacciona.";
+                reaction = "¡[nombre] acaba de encontrar un spawner a Y=" + y + "! Reacciona.";
             }
 
             if (reaction != null) {
@@ -163,10 +164,30 @@ public class PlayerStatusObserver {
 
                 if (danger && !wasInDanger) {
                     blackboard.setDangerWarned(uuid, true);
-                    String mobName = hostiles.get(0).getClass().getSimpleName().toLowerCase();
-                    String prompt = hostiles.size() > 3
-                            ? "¡Hay " + hostiles.size() + " mobs hostiles rodeando a [nombre]! Avísale."
-                            : "¡Hay un " + mobName + " rondando cerca de [nombre]! Avísale.";
+                    int hearts = (int) Math.ceil(player.getHealth() / 2);
+
+                    String prompt;
+                    if (hostiles.size() > 3) {
+                        // Muchos mobs: listar tipos únicos
+                        java.util.LinkedHashSet<String> types = new java.util.LinkedHashSet<>();
+                        for (var mob : hostiles) {
+                            types.add(mob.getName().getString());
+                            if (types.size() >= 3) break;
+                        }
+                        prompt = "¡Hay " + hostiles.size() + " mobs hostiles cerca de [nombre] (" +
+                                String.join(", ", types) + ")! Tiene " + hearts + " corazones. ¡Avísale!";
+                    } else if (hostiles.size() > 1) {
+                        // Pocos mobs: listar cada uno
+                        StringBuilder mobList = new StringBuilder();
+                        for (int i = 0; i < hostiles.size(); i++) {
+                            if (i > 0) mobList.append(i == hostiles.size() - 1 ? " y " : ", ");
+                            mobList.append(hostiles.get(i).getName().getString());
+                        }
+                        prompt = "¡Hay " + mobList + " cerca de [nombre]! Tiene " + hearts + " corazones. ¡Avísale!";
+                    } else {
+                        String mobName = hostiles.get(0).getName().getString();
+                        prompt = "¡Hay un " + mobName + " cerca de [nombre]! Tiene " + hearts + " corazones. ¡Avísale!";
+                    }
 
                     BotEvent event = new BotEvent(
                             player.getUUID(),
@@ -211,10 +232,17 @@ public class PlayerStatusObserver {
 
             String biome = getBiomeName(player).replace("_", " ");
             String dim = getDimensionName(player).replace("the_", "").replace("_", " ");
+            int hearts = (int) Math.ceil(player.getHealth() / 2);
+            int food = player.getFoodData().getFoodLevel();
+
+            String estado = "[nombre] está en el " + dim + ", " + timeDesc +
+                    ", bioma: " + biome +
+                    ", vida: " + hearts + " corazones, hambre: " + food + "/20." +
+                    " Di algo espontáneo y natural sobre la situación.";
 
             BotEvent event = new BotEvent(
                     player.getUUID(),
-                    "Estás en el " + dim + ", " + timeDesc + ", en un bioma de " + biome + ". Di algo espontáneo y natural sobre lo que estás viviendo ahora mismo.",
+                    estado,
                     Impact.NORMAL,
                     System.currentTimeMillis()
             );

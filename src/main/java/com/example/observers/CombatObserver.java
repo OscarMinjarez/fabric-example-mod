@@ -31,8 +31,20 @@ public class CombatObserver {
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (!(entity instanceof ServerPlayer player)) return;
 
-            String cause = damageSource.getMsgId();
-            String prompt = getDeathPrompt(cause);
+            // Usar el mensaje real del juego (ej: "Player246 fue empujado desde muy alto por Crepitante")
+            String prompt;
+            try {
+                String deathMessage = player.getCombatTracker().getDeathMessage().getString();
+                String mcName = player.getName().getString();
+                // Reemplazar el nombre de MC con [nombre] para que el controller ponga el nombre real
+                prompt = deathMessage.replace(mcName, "[nombre]") + " ¡Reacciona!";
+            } catch (Exception e) {
+                // Fallback si el CombatTracker falla
+                String cause = damageSource.getMsgId();
+                String attackerName = damageSource.getEntity() != null
+                        ? damageSource.getEntity().getName().getString() : null;
+                prompt = buildDeathFallback(cause, attackerName);
+            }
 
             BotEvent event = new BotEvent(
                     player.getUUID(),
@@ -46,26 +58,32 @@ public class CombatObserver {
         });
     }
 
-    private String getDeathPrompt(String cause) {
-        return switch (cause) {
-            case "fall" -> "Acabas de ver cómo [nombre] murió cayendo al vacío. Reacciona.";
-            case "drown" -> "¡[nombre] se acaba de ahogar! Reacciona.";
-            case "explosion", "explosion.player" -> "¡[nombre] explotó frente a ti! Reacciona.";
-            case "inFire", "onFire" -> "¡[nombre] murió quemado! Reacciona.";
-            case "starve" -> "[nombre] murió de hambre. Reacciona según tu personalidad.";
-            case "lava" -> "¡[nombre] cayó en lava y murió! Reacciona.";
-            case "mob" -> "Un mob acaba de matar a [nombre]. Reacciona.";
-            case "player" -> "¡Otro jugador acaba de matar a [nombre]! Reacciona.";
-            case "arrow" -> "¡[nombre] fue atravesado por una flecha! Reacciona.";
-            case "magic" -> "[nombre] murió por magia. Reacciona.";
-            case "wither" -> "El efecto wither acaba de matar a [nombre]. Reacciona.";
-            case "anvil" -> "¡Un yunque aplastó a [nombre]! Reacciona.";
-            case "fallingBlock" -> "¡Un bloque aplastó a [nombre]! Reacciona.";
-            case "flyIntoWall" -> "¡[nombre] voló contra una pared con la elytra! Reacciona.";
-            case "outOfWorld" -> "¡[nombre] cayó al vacío! Reacciona.";
-            case "lightningBolt" -> "¡Un rayo fulminó a [nombre]! Reacciona.";
-            default -> "Acabas de ver cómo [nombre] murió (" + cause + "). Reacciona.";
+    /**
+     * Fallback en caso de que getCombatTracker falle.
+     */
+    private String buildDeathFallback(String cause, String attackerName) {
+        String base = "[nombre] acaba de morir";
+        if (attackerName != null) {
+            base += " por culpa de " + attackerName;
+        }
+        base += switch (cause) {
+            case "fall" -> " por una caída";
+            case "drown" -> " ahogado";
+            case "lava" -> " en lava";
+            case "inFire", "onFire" -> " quemado";
+            case "explosion", "explosion.player" -> " por una explosión";
+            case "starve" -> " de hambre";
+            case "mob" -> " por un mob";
+            case "player" -> " por otro jugador";
+            case "arrow" -> " por una flecha";
+            case "magic" -> " por magia";
+            case "wither" -> " por efecto wither";
+            case "lightningBolt" -> " por un rayo";
+            case "outOfWorld" -> " al caer al vacío";
+            case "flyIntoWall" -> " al estrellarse con la elytra";
+            default -> " (" + cause + ")";
         };
+        return base + ". ¡Reacciona!";
     }
 
     private void registerPlayerDamage() {
@@ -74,9 +92,21 @@ public class CombatObserver {
             if (baseDamageTaken < 7.0f) return;
             if (ThreadLocalRandom.current().nextInt(100) >= 30) return;
 
+            String attackerName = source.getEntity() != null
+                    ? source.getEntity().getName().getString() : null;
+            int hearts = (int) Math.ceil(player.getHealth() / 2);
+            int damage = (int) Math.ceil(damageTaken / 2);
+
+            String prompt;
+            if (attackerName != null) {
+                prompt = "¡" + attackerName + " le pegó un golpe brutal a [nombre] (-" + damage + " corazones)! Le quedan " + hearts + " corazones.";
+            } else {
+                prompt = "¡[nombre] recibió un golpe brutal (-" + damage + " corazones)! Le quedan " + hearts + " corazones.";
+            }
+
             BotEvent event = new BotEvent(
                     player.getUUID(),
-                    "¡[nombre] acaba de recibir un golpe brutal!",
+                    prompt,
                     Impact.NORMAL,
                     System.currentTimeMillis()
             );
@@ -90,14 +120,14 @@ public class CombatObserver {
             if (!(damageSource.getEntity() instanceof ServerPlayer player)) return;
             if (entity instanceof ServerPlayer) return;
 
+            String mobDisplayName = entity.getName().getString();
             String className = entity.getClass().getSimpleName();
-            String mobName = className.toLowerCase().replace("boss", "").trim();
 
             String prompt;
-            Impact impact = Impact.NORMAL;
+            Impact impact;
 
             if (className.equals("EnderDragon")) {
-                prompt = "¡[nombre] acaba de matar al Ender Dragon! Reacciona con asombro total.";
+                prompt = "¡[nombre] acaba de matar al Ender Dragon! ¡Hazaña épica! Reacciona con asombro total.";
                 impact = Impact.HIGH;
             } else if (className.equals("WitherBoss")) {
                 prompt = "¡[nombre] derrotó al Wither! Reacciona.";
@@ -105,15 +135,19 @@ public class CombatObserver {
             } else if (className.equals("ElderGuardian")) {
                 prompt = "¡[nombre] derrotó al Elder Guardian! Reacciona.";
                 impact = Impact.HIGH;
+            } else if (className.equals("Warden")) {
+                prompt = "¡[nombre] mató a un Warden! Eso es casi imposible. Reacciona.";
+                impact = Impact.HIGH;
             } else if (className.equals("Evoker")) {
-                prompt = "[nombre] mató a un Evoker. Comenta algo.";
+                prompt = "[nombre] mató a un " + mobDisplayName + ". Comenta algo.";
+                impact = Impact.NORMAL;
             } else if (className.equals("Creeper")) {
                 if (ThreadLocalRandom.current().nextInt(100) >= 25) return;
-                prompt = "[nombre] mató un creeper. Comenta brevemente.";
+                prompt = "[nombre] mató un " + mobDisplayName + " antes de que explotara.";
                 impact = Impact.LOW;
             } else {
                 if (ThreadLocalRandom.current().nextInt(100) >= 8) return;
-                prompt = "[nombre] mató a un " + mobName + ". Di algo corto.";
+                prompt = "[nombre] mató a un " + mobDisplayName + ".";
                 impact = Impact.LOW;
             }
 
@@ -128,4 +162,3 @@ public class CombatObserver {
         });
     }
 }
-
