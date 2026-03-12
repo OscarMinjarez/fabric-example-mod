@@ -35,12 +35,15 @@ public class PromptManager {
                 "Personalidad: [" + traits + "]. " +
                 "Forma de hablar: [" + style + "]. " +
                 "\n\nIDIOMA Y REGIONALISMO: " + lang.promptInstructions() +
-                "\n\nREGLAS:" +
+                "\n\nREGLAS ESTRICTAS:" +
                 "\n1. NO uses asteriscos ni roleplay (*sonríe*). Solo texto." +
                 "\n2. Habla como gamer casual, nada filosófico." +
                 "\n3. Mensajes CORTOS (1-2 oraciones), como Discord." +
                 "\n4. Cuando el jugador muere o le pasa algo, es A ÉL, no a ti." +
-                "\n5. NO te presentes de forma rara. Actúa natural.";
+                "\n5. NO te presentes de forma rara. Actúa natural." +
+                "\n6. NO inventes detalles que no te hayan dicho. Solo reacciona a lo que SABES que pasó. No agregues distancias, nombres de mobs, ni detalles inventados." +
+                "\n7. Habla natural y relajado. NO exageres expresiones regionales ni estereotipos (nada de 'ay caramba', 'ándale', 'arriba', etc). Sé auténtico, no caricatura." +
+                "\n8. Usa el NOMBRE del jugador cuando lo sepas. Refiérete a él por su nombre, no como 'el jugador'.";
     }
 
     /**
@@ -83,7 +86,7 @@ public class PromptManager {
 
     public String buildShortPrompt(JsonObject personality, String languageCode) {
         return buildSystemPrompt(personality, languageCode) +
-                "\n\nINSTRUCCIÓN: Reacciona BREVÍSIMO (1-6 palabras). Sin preguntas. Visceral según tu personalidad.";
+                "\n\nINSTRUCCIÓN: Reacciona BREVÍSIMO (1-6 palabras). Sin preguntas. Visceral según tu personalidad. NO inventes detalles.";
     }
 
     public String buildShortPrompt(JsonObject personality) {
@@ -92,7 +95,7 @@ public class PromptManager {
 
     public String buildNormalPrompt(JsonObject personality, String languageCode) {
         return buildSystemPrompt(personality, languageCode) +
-                "\n\nINSTRUCCIÓN: Comenta casual y breve (máx 2 oraciones). Tu estilo.";
+                "\n\nINSTRUCCIÓN: Comenta casual y breve (máx 2 oraciones). Tu estilo. Solo menciona lo que te dijeron, NO inventes.";
     }
 
     public String buildNormalPrompt(JsonObject personality) {
@@ -101,7 +104,7 @@ public class PromptManager {
 
     public String buildEmotivePrompt(JsonObject personality, String languageCode) {
         return buildSystemPrompt(personality, languageCode) +
-                "\n\nINSTRUCCIÓN: Algo importante pasó AL JUGADOR. Reacciona expresivo (susto, burla, asombro). Máx 2 oraciones.";
+                "\n\nINSTRUCCIÓN: Algo importante pasó AL JUGADOR. Reacciona expresivo (susto, burla, asombro). Máx 2 oraciones. NO inventes detalles extra.";
     }
 
     public String buildEmotivePrompt(JsonObject personality) {

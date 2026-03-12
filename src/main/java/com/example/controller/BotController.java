@@ -114,8 +114,8 @@ public class BotController {
         }
 
         String uuid = event.playerUuid().toString();
-        LOGGER.info("Procesando evento: {} para jugador {}", event.prompt(), uuid);
-        
+        LOGGER.info("Procesando evento: [{}] para jugador {}", event.prompt(), uuid);
+
         MinecraftServer server = blackboard.getCurrentServer();
         if (server == null) {
             LOGGER.warn("Server es null, reponiendo evento");
@@ -200,7 +200,7 @@ public class BotController {
             String reply = ollamaClient.callOllama(systemPrompt, userPrompt, new JsonArray());
             sendMessage(player, botName, reply);
             blackboard.addAwaitingName(uuid);
-            LOGGER.info("[NuevoJugador] {}: {}", botName, reply);
+            LOGGER.info("[Nuevo] {}: {}", botName, reply);
         } catch (Exception e) {
             LOGGER.error("Error en saludo a nuevo jugador: {}", e.getMessage());
         }
@@ -211,6 +211,8 @@ public class BotController {
         if (personality == null) return;
         String playerName = blackboard.getPlayerName(uuid);
         if (playerName == null) {
+            // Jugador que regresa pero sin nombre registrado — pedirle nombre de nuevo
+            LOGGER.info("[Regreso sin nombre] Pidiendo nombre al jugador {}", uuid);
             handleNewPlayerGreeting(player, uuid);
             return;
         }
@@ -225,7 +227,7 @@ public class BotController {
             blackboard.addPlayerHistory(uuid, "assistant", reply, ollamaClient.getMaxHistory());
             dataManager.saveData();
             sendMessage(player, botName, reply);
-            LOGGER.info("[{}] {}: {}", playerName, botName, reply);
+            LOGGER.info("[Regreso: {}] {}: {}", playerName, botName, reply);
         } catch (Exception e) {
             LOGGER.error("Error en saludo a jugador que regresa: {}", e.getMessage());
         }
@@ -284,6 +286,7 @@ public class BotController {
         String systemPrompt = promptManager.buildPromptWithPlayerName(personality, event.impact(), playerName, language);
         JsonArray history = blackboard.getPlayerHistory(uuid);
         String prompt = event.prompt().replace("[nombre]", playerName);
+        LOGGER.debug("Prompt con nombre reemplazado: {}", prompt);
         try {
             long delay = switch (event.impact()) {
                 case LOW -> ThreadLocalRandom.current().nextLong(1000, 2000);
